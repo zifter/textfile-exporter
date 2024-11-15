@@ -47,6 +47,12 @@ func (m *MetricsExporter) metricsHandler(w http.ResponseWriter, r *http.Request)
 	w.Write(m.content)
 }
 
+func okHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("OK"))
+}
+
 var conf config
 
 func init() {
@@ -84,6 +90,7 @@ func main() {
 	}
 
 	http.HandleFunc(conf.MetricsEndpoint, exporter.metricsHandler)
+	http.HandleFunc("/", okHandler)
 
 	log.Printf("metrics are exposed on %s", conf.MetricsEndpoint)
 
