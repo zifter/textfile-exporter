@@ -12,6 +12,7 @@ import (
 )
 
 type config struct {
+	ServeAddr       string        `mapstructure:"serve_addr"`
 	MetricsFilePath string        `mapstructure:"metrics_file_path"`
 	MetricsEndpoint string        `mapstructure:"metrics_endpoint"`
 	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
@@ -61,7 +62,7 @@ func init() {
 }
 
 func main() {
-	log.Printf("metrics file: %s, refresh interval: %d",
+	log.Printf("metrics file: %s, refresh interval: %v",
 		conf.MetricsFilePath,
 		conf.RefreshInterval)
 
@@ -86,7 +87,7 @@ func main() {
 
 	log.Printf("metrics are exposed on %s", conf.MetricsEndpoint)
 
-	err := http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(conf.ServeAddr, nil)
 	if err == http.ErrServerClosed {
 		log.Printf("HTTP/HTTPS server closed")
 		os.Exit(0)
