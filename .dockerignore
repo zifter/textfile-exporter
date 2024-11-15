@@ -1,0 +1,5 @@
+*
+!go.sum
+!main.go
+!go.mod
+!metrics.txt

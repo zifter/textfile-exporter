@@ -1,0 +1,3 @@
+# HELP textfile_exporter_up Size of Docker images in bytes
+# TYPE textfile_exporter_up gauge
+textfile_exporter_up{} 1
