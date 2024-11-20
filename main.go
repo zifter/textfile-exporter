@@ -16,6 +16,8 @@ type config struct {
 	MetricsFilePath string        `mapstructure:"metrics_file_path"`
 	MetricsEndpoint string        `mapstructure:"metrics_endpoint"`
 	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
+
+	LogOutput string `mapstructure:"log_output"`
 }
 
 // Структура для хранения метрик
@@ -59,6 +61,7 @@ func init() {
 	viper.SetDefault("serve_addr", ":8080")
 	viper.SetDefault("metrics_file_path", "metrics.txt")
 	viper.SetDefault("metrics_endpoint", "/metrics")
+	viper.SetDefault("log_output", "stdout")
 	viper.SetDefault("refresh_interval", 0*time.Second)
 
 	viper.AutomaticEnv()
@@ -68,6 +71,10 @@ func init() {
 }
 
 func main() {
+	if conf.LogOutput == "stdout" {
+		log.SetOutput(os.Stdout)
+	}
+
 	log.Printf("metrics file: %s, refresh interval: %v",
 		conf.MetricsFilePath,
 		conf.RefreshInterval)
