@@ -2,7 +2,7 @@ BINARY     := textfile-exporter
 IMAGE      := textfile-exporter
 METRICS    := metrics.txt
 
-.PHONY: all build run clean check vet fmt docker-build docker-run
+.PHONY: all build run clean test check vet fmt docker-build docker-run
 
 all: build
 
@@ -15,7 +15,10 @@ run: build
 clean:
 	rm -f $(BINARY)
 
-check: vet fmt
+test:
+	go test -v ./...
+
+check: vet fmt test
 	go mod verify
 
 vet:
