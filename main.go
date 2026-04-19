@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/viper"
@@ -16,37 +19,46 @@ type config struct {
 	MetricsFilePath string        `mapstructure:"metrics_file_path"`
 	MetricsEndpoint string        `mapstructure:"metrics_endpoint"`
 	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
-
-	LogOutput string `mapstructure:"log_output"`
+	LogOutput       string        `mapstructure:"log_output"`
 }
 
-// Структура для хранения метрик
+func loadConfig() (config, error) {
+	viper.SetDefault("serve_addr", ":8080")
+	viper.SetDefault("metrics_file_path", "metrics.txt")
+	viper.SetDefault("metrics_endpoint", "/metrics")
+	viper.SetDefault("log_output", "stdout")
+	viper.SetDefault("refresh_interval", 0*time.Second)
+
+	viper.AutomaticEnv()
+
+	var conf config
+	if err := viper.Unmarshal(&conf); err != nil {
+		return config{}, fmt.Errorf("failed to parse config: %w", err)
+	}
+	return conf, nil
+}
+
 type MetricsExporter struct {
 	content []byte
 	mu      sync.RWMutex
 }
 
-func (m *MetricsExporter) loadMetricsFromFile(metricsFilePath string) error {
-	data, err := os.ReadFile(metricsFilePath)
+func (m *MetricsExporter) loadFromFile(path string) error {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("error during reading file: %w", err)
+		return fmt.Errorf("error reading file: %w", err)
 	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	m.content = data
-
 	return nil
 }
 
-func (m *MetricsExporter) metricsHandler(w http.ResponseWriter, r *http.Request) {
+func (m *MetricsExporter) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	w.Write(m.content)
+	_, _ = w.Write(m.content)
 }
 
 func okHandler(w http.ResponseWriter, r *http.Request) {
@@ -55,33 +67,21 @@ func okHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("OK"))
 }
 
-var conf config
-
-func init() {
-	viper.SetDefault("serve_addr", ":8080")
-	viper.SetDefault("metrics_file_path", "metrics.txt")
-	viper.SetDefault("metrics_endpoint", "/metrics")
-	viper.SetDefault("log_output", "stdout")
-	viper.SetDefault("refresh_interval", 0*time.Second)
-
-	viper.AutomaticEnv()
-	if err := viper.Unmarshal(&conf); err != nil {
-		panic(err)
-	}
-}
-
 func main() {
+	conf, err := loadConfig()
+	if err != nil {
+		log.Fatalf("config error: %v", err)
+	}
+
 	if conf.LogOutput == "stdout" {
 		log.SetOutput(os.Stdout)
 	}
 
-	log.Printf("metrics file: %s, refresh interval: %v",
-		conf.MetricsFilePath,
-		conf.RefreshInterval)
+	log.Printf("metrics file: %s, refresh interval: %v", conf.MetricsFilePath, conf.RefreshInterval)
 
 	exporter := &MetricsExporter{}
-	if err := exporter.loadMetricsFromFile(conf.MetricsFilePath); err != nil {
-		log.Fatalf("error during loading metrics from file: %v", err)
+	if err := exporter.loadFromFile(conf.MetricsFilePath); err != nil {
+		log.Fatalf("failed to load metrics: %v", err)
 	}
 
 	if conf.RefreshInterval > 0 {
@@ -89,23 +89,37 @@ func main() {
 			ticker := time.NewTicker(conf.RefreshInterval)
 			defer ticker.Stop()
 			for range ticker.C {
-				if err := exporter.loadMetricsFromFile(conf.MetricsFilePath); err != nil {
-					log.Printf("failed to load metrics file: %v", err)
+				if err := exporter.loadFromFile(conf.MetricsFilePath); err != nil {
+					log.Printf("failed to reload metrics: %v", err)
 				}
 			}
 		}()
 	}
 
-	http.HandleFunc(conf.MetricsEndpoint, exporter.metricsHandler)
-	http.HandleFunc("/", okHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc(conf.MetricsEndpoint, exporter.handler)
+	mux.HandleFunc("/", okHandler)
 
-	log.Printf("metrics are exposed on %s", conf.MetricsEndpoint)
+	srv := &http.Server{
+		Addr:    conf.ServeAddr,
+		Handler: mux,
+	}
 
-	err := http.ListenAndServe(conf.ServeAddr, nil)
-	if err == http.ErrServerClosed {
-		log.Printf("HTTP/HTTPS server closed")
-		os.Exit(0)
-	} else {
-		log.Fatal("Unable to start HTTP/HTTPS listener")
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		<-quit
+		log.Println("shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("shutdown error: %v", err)
+		}
+	}()
+
+	log.Printf("metrics exposed on %s%s", conf.ServeAddr, conf.MetricsEndpoint)
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
 	}
 }
